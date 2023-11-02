@@ -1,7 +1,16 @@
+import pickle
+import random
+
 import numpy as np
 from tqdm import tqdm
 import tensorflow as tf
 from transformers import BertTokenizer, TFBertModel
+
+from inputs import read_id_features
+
+seed = 1234
+random.seed(seed)
+np.random.seed(seed)
 
 
 # BERT
@@ -79,10 +88,9 @@ class BERT(object):
 
 
 # fasttext
-def get_fasttext_vectors(words):
+def get_fasttext_vectors(words, all_vectors_file):
     word2embs = {}
-    # with open("data/wiki.en.vec", 'r', encoding='utf-8') as f: wiki.de.align
-    with open("data/wiki.de.align.vec", 'r', encoding='utf-8') as f:
+    with open(all_vectors_file, 'r', encoding='utf-8') as f:
         f.readline()
         for line in f:
             word, embed = line.strip().split(' ', 1)
@@ -102,7 +110,7 @@ def reduce(embeds, method, axis=0):
         return np.min(embeds, axis)
 
 
-def fasttext_embedding(names, words_aggr_type):
+def fasttext_embedding(names, words_aggr_type, all_vectors_file):
     word_id_map = {}
     ent_words = []
     for name in names:
@@ -113,7 +121,7 @@ def fasttext_embedding(names, words_aggr_type):
         word_ids = [word_id_map[word] for word in words]
         ent_words.append(word_ids)
     all_words = sorted(list(word_id_map.keys()), key=lambda x: word_id_map[x])
-    all_embs = get_fasttext_vectors(all_words)
+    all_embs = get_fasttext_vectors(all_words, all_vectors_file)
     embeds = []
     if words_aggr_type == 'cpm':
         for word_ids in ent_words:
@@ -125,4 +133,68 @@ def fasttext_embedding(names, words_aggr_type):
         for word_ids in ent_words:
             embeds.append(reduce(all_embs[word_ids], 'mean'))
     return np.vstack(embeds)
+
+
+def write_fasttext_vec_file(feature_file, output_file, all_vectors_file):
+    id_names = read_id_features(feature_file)
+    ids = list(id_names.keys())
+    names = list(id_names.values())
+    embeds = fasttext_embedding(names, "mean", all_vectors_file)
+    id_embeds = dict(zip(ids, embeds))
+    with open(output_file + ".pkl", 'wb') as f:
+        pickle.dump(id_embeds, f)
+
+
+if __name__ == '__main__':
+    datasets = ["data/DBP15K/zh_en/", "data/DBP15K/ja_en/", "data/DBP15K/fr_en/"]
+    all_vectors_file = "data/wiki.en.vec"
+    for path in datasets:
+        print("write vectors for " + path)
+        feature_file_1 = path + "id_features_1"
+        output_file_1 = path + "fasttext_mean_1"
+        write_fasttext_vec_file(feature_file_1, output_file_1, all_vectors_file)
+        feature_file_2 = path + "id_features_2"
+        output_file_2 = path + "fasttext_mean_2"
+        write_fasttext_vec_file(feature_file_2, output_file_2, all_vectors_file)
+
+    path = "data/SRPRS/en_fr_15k_V1/"
+    print("write vectors for " + path)
+    feature_file_1 = path + "id_features_1"
+    output_file_1 = path + "fasttext_mean_1"
+    write_fasttext_vec_file(feature_file_1, output_file_1, "data/wiki.en.align.vec")
+    feature_file_2 = path + "id_features_2"
+    output_file_2 = path + "fasttext_mean_2"
+    write_fasttext_vec_file(feature_file_2, output_file_2, "data/wiki.fr.align.vec")
+
+    path = "data/SRPRS/en_de_15k_V1/"
+    print("write vectors for " + path)
+    feature_file_1 = path + "id_features_1"
+    output_file_1 = path + "fasttext_mean_1"
+    write_fasttext_vec_file(feature_file_1, output_file_1, "data/wiki.en.align.vec")
+    feature_file_2 = path + "id_features_2"
+    output_file_2 = path + "fasttext_mean_2"
+    write_fasttext_vec_file(feature_file_2, output_file_2, "data/wiki.de.align.vec")
+
+    datasets = ["data/DBP15K/zh_en/", "data/DBP15K/ja_en/", "data/DBP15K/fr_en/",
+                "data/SRPRS/en_fr_15k_V1/", "data/SRPRS/en_de_15k_V1/"]
+    for path in datasets:
+        print("merge vectors for " + path)
+        file = open(path + "fasttext_mean_1.pkl", 'rb')
+        id_embeds1 = pickle.load(file)
+        print(len(id_embeds1))
+        file = open(path + "fasttext_mean_2.pkl", 'rb')
+        id_embeds2 = pickle.load(file)
+        print(len(id_embeds2))
+        ids = list(id_embeds1.keys())
+        ids.extend(list(id_embeds2.keys()))
+        embedding_list = []
+        for i in sorted(ids):
+            value = id_embeds1.get(i)
+            if value is None:
+                value = id_embeds2.get(i)
+            embedding_list.append(list(value))
+        with open(path + "fasttext_mean_all.pkl", 'wb') as f:
+            pickle.dump(embedding_list, f)
+        print('fasttext: {} rows, {} columns'.format(len(embedding_list), len(embedding_list[0])))
+
 
